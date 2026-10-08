@@ -67,7 +67,7 @@ async function getActivities() {
       const existingPage = await notion.databases.query({
         database_id: NOTION_DATABASE_ID,
         filter: {
-          property: "Strava ID", // Puedes renombrar esta propiedad a "Wahoo ID" en Notion si lo deseas
+          property: "Wahoo ID", // Puedes renombrar esta propiedad a "Wahoo ID" en Notion si lo deseas
           rich_text: {
             equals: workoutId,
           },
@@ -102,7 +102,7 @@ async function getActivities() {
             Media: {
               number: averageSpeedKmH,
             },
-            "Strava ID": {
+            "Wahoo ID": {
               rich_text: [
                 {
                   text: {
