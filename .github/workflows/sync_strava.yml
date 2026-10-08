@@ -11,16 +11,17 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3 # Actualiza a la versión más reciente de checkout (v3)
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3 # Actualiza a la versión más reciente de setup-node (v3)
+        uses: actions/setup-node@v4
         with:
-          node-version: "16" # Usa Node.js 16
+          node-version: "20" # Node.js 20 (LTS)
+          cache: "npm" # Activa la caché de dependencias de npm
 
       - name: Install dependencies
         run: |
-          npm install  # Instala las dependencias de tu proyecto
+          npm ci # Recomendado para CI/CD en lugar de 'npm install'
 
       - name: Run Strava to Notion Sync Script
         env:
@@ -31,4 +32,4 @@ jobs:
           NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: |
-          node sync-strava.js  # Ejecuta el script que sincroniza Strava con Notion
+          node sync-strava.js
