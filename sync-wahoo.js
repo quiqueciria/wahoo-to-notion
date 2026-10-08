@@ -12,7 +12,7 @@ const wahooUrl = "https://api.wahooligan.com/v1/workouts";
 const notion = new Client({ auth: process.env.NOTION_INTEGRATION_TOKEN });
 const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
-// Función para actualizar el token de Wahoo
+// Función para renovar el token de Wahoo
 async function refreshAccessToken() {
   try {
     const params = new URLSearchParams();
@@ -40,7 +40,7 @@ async function refreshAccessToken() {
   }
 }
 
-// Función para obtener entrenamientos de Wahoo y sincronizar con Notion
+// Función principal de sincronización
 async function getActivities() {
   try {
     const response = await axios.get(wahooUrl, {
@@ -54,29 +54,32 @@ async function getActivities() {
       return;
     }
 
-    console.log(`Se han encontrado ${workouts.length} entrenamientos en Wahoo.`);
+    console.log(`Procesando ${workouts.length} entrenamientos...`);
 
-    for (const workout of workouts) {
-      const workoutId = workout.id.toString();
+    for (const item of workouts) {
+      // Extraer workout_summary o el objeto directamente
+      const summary = item.workout_summary || item;
 
-      // Extraer métricas probando la estructura de resumen de Wahoo v1
-      const summary = workout.workout_summary || workout.summary || {};
-      const rawDistance = summary.distance_accum || workout.distance_accum || 0; // en metros
-      const rawDuration = summary.duration_active_accum || workout.duration_total || workout.moving_time_accum || 0; // en segundos
+      if (!summary || !summary.id) continue;
 
-      // Conversiones de métricas
-      const distanceInKilometers = parseFloat((rawDistance / 1000).toFixed(2));
+      const workoutId = summary.id.toString();
+
+      // Métricas desde los nombres reales expuestos por Wahoo
+      const rawDistance = parseFloat(summary.distance_accum || 0);
+      const rawDuration = parseFloat(summary.duration_active_accum || summary.duration_total_accum || 0);
+      const rawSpeed = parseFloat(summary.speed_avg || 0);
+
+      const distanceInKm = parseFloat((rawDistance / 1000).toFixed(2));
       const elapsedTimeInHours = parseFloat((rawDuration / 3600).toFixed(2));
       
-      const averageSpeedKmH = elapsedTimeInHours > 0 
-        ? parseFloat((distanceInKilometers / elapsedTimeInHours).toFixed(2)) 
-        : 0;
+      // speed_avg viene en m/s -> multiplicar por 3.6 para obtener km/h
+      const averageSpeedKmH = parseFloat((rawSpeed * 3.6).toFixed(2));
 
-      const startDate = workout.starts_at || workout.created_at;
-      const workoutName = workout.name || `Ciclismo Wahoo (${startDate ? startDate.split('T')[0] : 'Sin fecha'})`;
+      const startDate = summary.started_at || summary.created_at;
+      const workoutName = summary.name || `Cycling (${startDate ? startDate.split("T")[0] : ""})`;
 
-      // Intentar buscar en Notion tanto por 'Wahoo ID' como por 'Strava ID' (para mantener compatibilidad)
-      let existingPage = await notion.databases.query({
+      // Buscar si el entrenamiento ya existe en Notion
+      const existingPage = await notion.databases.query({
         database_id: NOTION_DATABASE_ID,
         filter: {
           or: [
@@ -85,7 +88,6 @@ async function getActivities() {
           ]
         },
       }).catch(async () => {
-        // Fallback por si la base de datos de Notion solo tiene 'Strava ID' o solo 'Wahoo ID'
         return await notion.databases.query({
           database_id: NOTION_DATABASE_ID,
           filter: {
@@ -96,13 +98,13 @@ async function getActivities() {
       });
 
       if (existingPage.results.length === 0) {
-        // Intentar crear la página en Notion ajustando la columna de ID
+        // Objeto de propiedades para Notion
         const properties = {
           Name: {
             title: [{ text: { content: workoutName } }],
           },
           Distance: {
-            number: distanceInKilometers,
+            number: distanceInKm,
           },
           Date: {
             date: { start: startDate },
@@ -115,7 +117,7 @@ async function getActivities() {
           },
         };
 
-        // Asignamos 'Wahoo ID' (o 'Strava ID' si no has renombrado la columna en Notion)
+        // Asignar según el nombre de la columna en Notion
         properties["Wahoo ID"] = {
           rich_text: [{ text: { content: workoutId } }],
         };
@@ -125,35 +127,35 @@ async function getActivities() {
             parent: { database_id: NOTION_DATABASE_ID },
             properties: properties,
           });
-          console.log(`✅ Entrenamiento '${workoutName}' (${distanceInKilometers} km) añadido a Notion.`);
+          console.log(`✅ Actividad '${workoutName}' (${distanceInKm} km) guardada en Notion.`);
         } catch (notionError) {
+          // Si la columna en Notion aún se llama 'Strava ID'
           if (notionError.message.includes("Wahoo ID")) {
-            // Si Notion falla porque la columna aún se llama 'Strava ID'
             delete properties["Wahoo ID"];
             properties["Strava ID"] = { rich_text: [{ text: { content: workoutId } }] };
             await notion.pages.create({
               parent: { database_id: NOTION_DATABASE_ID },
               properties: properties,
             });
-            console.log(`✅ Entrenamiento '${workoutName}' añadido a Notion (usando 'Strava ID').`);
+            console.log(`✅ Actividad '${workoutName}' guardada en Notion (usando 'Strava ID').`);
           } else {
-            console.error(`❌ Error al guardar '${workoutName}' en Notion:`, notionError.message);
+            console.error(`❌ Error guardando '${workoutName}' en Notion:`, notionError.message);
           }
         }
       } else {
-        console.log(`ℹ️ El entrenamiento '${workoutName}' ya existía en Notion.`);
+        console.log(`ℹ️ La actividad '${workoutName}' (ID ${workoutId}) ya existe en Notion.`);
       }
     }
   } catch (error) {
     if (error.response && error.response.status === 401) {
-      console.log("El token de Wahoo expiró, renovando...");
+      console.log("Token caducado. Renovando token de acceso...");
       WAHOO_ACCESS_TOKEN = await refreshAccessToken();
       await getActivities();
     } else {
-      console.error(`Error general al sincronizar: ${error.message}`);
+      console.error(`Error de ejecución: ${error.message}`);
     }
   }
 }
 
-// Ejecutar la sincronización
+// Iniciar script
 getActivities();
