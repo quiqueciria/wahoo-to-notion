@@ -15,15 +15,19 @@ const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID;
 // Función para actualizar el token de Wahoo
 async function refreshAccessToken() {
   try {
+    // Usamos URLSearchParams para asegurar el formato application/x-www-form-urlencoded
+    const params = new URLSearchParams();
+    params.append("client_id", WAHOO_CLIENT_ID);
+    params.append("client_secret", WAHOO_CLIENT_SECRET);
+    params.append("grant_type", "refresh_token");
+    params.append("refresh_token", WAHOO_REFRESH_TOKEN);
+
     const response = await axios.post(
       "https://api.wahooligan.com/oauth/token",
-      null,
+      params,
       {
-        params: {
-          client_id: WAHOO_CLIENT_ID,
-          client_secret: WAHOO_CLIENT_SECRET,
-          grant_type: "refresh_token",
-          refresh_token: WAHOO_REFRESH_TOKEN,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
         },
       }
     );
