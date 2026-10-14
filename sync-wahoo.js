@@ -12,7 +12,7 @@ const wahooUrl = "https://api.wahooligan.com/v1/workouts";
 const notion = new Client({ auth: process.env.NOTION_INTEGRATION_TOKEN });
 const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
-// Función para renovar el token de Wahoo
+// Función para renovar el token de Wahoo con manejo detallado de errores
 async function refreshAccessToken() {
   try {
     const params = new URLSearchParams();
@@ -20,6 +20,8 @@ async function refreshAccessToken() {
     params.append("client_secret", WAHOO_CLIENT_SECRET);
     params.append("grant_type", "refresh_token");
     params.append("refresh_token", WAHOO_REFRESH_TOKEN);
+
+    console.log("Iniciando renovación del token de acceso de Wahoo...");
 
     const response = await axios.post(
       "https://api.wahooligan.com/oauth/token",
@@ -32,10 +34,11 @@ async function refreshAccessToken() {
     );
 
     WAHOO_ACCESS_TOKEN = response.data.access_token;
-    console.log("Nuevo token de acceso de Wahoo obtenido con éxito.");
+    console.log("✅ Nuevo token de acceso de Wahoo obtenido con éxito.");
     return WAHOO_ACCESS_TOKEN;
   } catch (error) {
-    console.error("Error al renovar el token de acceso de Wahoo:", error.response?.data || error);
+    console.error("❌ DETALLE DEL ERROR DE RENOVACIÓN EN WAHOO:");
+    console.error(JSON.stringify(error.response?.data || error.message, null, 2));
     throw error;
   }
 }
@@ -54,17 +57,17 @@ async function getActivities() {
       return;
     }
 
-    console.log(`Procesando ${workouts.length} entrenamientos...`);
+    console.log(`🚴‍♂️ Procesando ${workouts.length} entrenamientos...`);
 
     for (const item of workouts) {
-      // Extraer workout_summary o el objeto directamente
+      // Extraer workout_summary o el objeto directamente según venga en la respuesta
       const summary = item.workout_summary || item;
 
       if (!summary || !summary.id) continue;
 
       const workoutId = summary.id.toString();
 
-      // Métricas desde los nombres reales expuestos por Wahoo
+      // Métricas desde los nombres reales de la API v1 de Wahoo
       const rawDistance = parseFloat(summary.distance_accum || 0);
       const rawDuration = parseFloat(summary.duration_active_accum || summary.duration_total_accum || 0);
       const rawSpeed = parseFloat(summary.speed_avg || 0);
@@ -72,7 +75,7 @@ async function getActivities() {
       const distanceInKm = parseFloat((rawDistance / 1000).toFixed(2));
       const elapsedTimeInHours = parseFloat((rawDuration / 3600).toFixed(2));
       
-      // speed_avg viene en m/s -> multiplicar por 3.6 para obtener km/h
+      // speed_avg viene en m/s -> multiplicar por 3.6 para pasar a km/h
       const averageSpeedKmH = parseFloat((rawSpeed * 3.6).toFixed(2));
 
       const startDate = summary.started_at || summary.created_at;
@@ -117,7 +120,7 @@ async function getActivities() {
           },
         };
 
-        // Asignar según el nombre de la columna en Notion
+        // Asignar por defecto a 'Wahoo ID'
         properties["Wahoo ID"] = {
           rich_text: [{ text: { content: workoutId } }],
         };
@@ -129,7 +132,7 @@ async function getActivities() {
           });
           console.log(`✅ Actividad '${workoutName}' (${distanceInKm} km) guardada en Notion.`);
         } catch (notionError) {
-          // Si la columna en Notion aún se llama 'Strava ID'
+          // Fallback por si en Notion la columna todavía se llama 'Strava ID'
           if (notionError.message.includes("Wahoo ID")) {
             delete properties["Wahoo ID"];
             properties["Strava ID"] = { rich_text: [{ text: { content: workoutId } }] };
@@ -137,7 +140,7 @@ async function getActivities() {
               parent: { database_id: NOTION_DATABASE_ID },
               properties: properties,
             });
-            console.log(`✅ Actividad '${workoutName}' guardada en Notion (usando 'Strava ID').`);
+            console.log(`✅ Actividad '${workoutName}' guardada en Notion (usando columna 'Strava ID').`);
           } else {
             console.error(`❌ Error guardando '${workoutName}' en Notion:`, notionError.message);
           }
@@ -148,11 +151,12 @@ async function getActivities() {
     }
   } catch (error) {
     if (error.response && error.response.status === 401) {
-      console.log("Token caducado. Renovando token de acceso...");
+      console.log("⚠️ Token caducado (401). Intentando renovar token de acceso...");
       WAHOO_ACCESS_TOKEN = await refreshAccessToken();
+      // Reintentar la obtención de actividades una vez renovado
       await getActivities();
     } else {
-      console.error(`Error de ejecución: ${error.message}`);
+      console.error(`❌ Error general de ejecución: ${error.message}`);
     }
   }
 }
